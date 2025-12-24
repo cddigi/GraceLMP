@@ -440,7 +440,6 @@ function generate_report(result::SessionResult)::String
         report *= """
         Agent $(i):
         ├─ Role: $(perf["agent_role"])
-        ├─ Model: $(perf["model_type"])
         ├─ Tasks Completed: $(perf["total_tasks"])
         └─ Avg Execution Time: $(round(perf["average_execution_time"], digits=3))s
 
