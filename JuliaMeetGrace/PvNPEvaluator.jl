@@ -184,10 +184,10 @@ function create_task_for_problem(problem::SATProblemInstance, role::AgentRole)::
         "difficulty" => "NP-Complete"
     )
 
-    if role == SOLVER
+    if role == AgentSpawner.SOLVER
         return AgentTask("SAT", description, input_data, "Boolean array",
                         ["Must satisfy all clauses", "Assignment length = num_variables"])
-    elseif role == VERIFIER
+    elseif role == AgentSpawner.VERIFIER
         return AgentTask("SAT Verification", description, input_data, "Boolean",
                         ["Check all clauses satisfied"])
     else
@@ -210,10 +210,10 @@ function create_task_for_problem(problem::TSPProblemInstance, role::AgentRole)::
         "difficulty" => "NP-Hard"
     )
 
-    if role == SOLVER
+    if role == AgentSpawner.SOLVER
         return AgentTask("TSP", description, input_data, "Integer array (tour)",
                         ["Visit each city exactly once", "Return to start"])
-    elseif role == VERIFIER
+    elseif role == AgentSpawner.VERIFIER
         return AgentTask("TSP Verification", description, input_data, "Boolean",
                         ["Verify valid tour", "Calculate total distance"])
     else

@@ -27,8 +27,8 @@ Examples:
 include("PvNPEvaluator.jl")
 
 using .PvNPEvaluator
-using .NPComplete
-using .AgentSpawner
+using .PvNPEvaluator.NPComplete
+using .PvNPEvaluator.AgentSpawner
 
 # ============================================================================
 # Command Line Interface
