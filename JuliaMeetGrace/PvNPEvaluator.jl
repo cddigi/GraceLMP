@@ -94,9 +94,9 @@ end
 # ============================================================================
 
 function create_evaluation_session(problem_type::String, size::Int,
-                                   model_types::Vector{String}=["ollama"])::EvaluationSession
+                                   num_agent_teams::Int=1)::EvaluationSession
     problem = generate_problem_instance(problem_type, size)
-    agents = create_agent_team(model_types)
+    agents = create_agent_team(num_agent_teams)
 
     session = EvaluationSession(problem, agents)
     println("📊 Created evaluation session: $(session.session_id)")
@@ -138,30 +138,16 @@ function generate_problem_instance(problem_type::String, size::Int)::ProblemInst
     end
 end
 
-function create_agent_team(model_types::Vector{String})::Vector{Agent}
+function create_agent_team(num_teams::Int=1)::Vector{Agent}
     agents = Agent[]
 
-    for model_type in model_types
-        model = create_model(model_type)
-
-        push!(agents, create_solver_agent(model))
-        push!(agents, create_verifier_agent(model))
-        push!(agents, create_analyzer_agent(model))
+    for _ in 1:num_teams
+        push!(agents, create_solver_agent())
+        push!(agents, create_verifier_agent())
+        push!(agents, create_analyzer_agent())
     end
 
     return agents
-end
-
-function create_model(model_type::String)::GenAIModel
-    if model_type == "claude"
-        return ClaudeModel()
-    elseif model_type == "gpt"
-        return GPTModel()
-    elseif model_type == "ollama"
-        return OllamaModel()
-    else
-        return OllamaModel()
-    end
 end
 
 # ============================================================================

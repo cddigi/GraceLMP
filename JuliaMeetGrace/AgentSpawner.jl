@@ -1,65 +1,24 @@
 """
-AgentSpawner.jl - GenAI Model Integration for Agent Spawning
+AgentSpawner.jl - Agent Task Definitions for Claude Code Sub-Agents
 
-This module provides integration with various GenAI models to spawn
-pre-scripted agents for P vs NP problem solving evaluation.
+This module defines agent roles and tasks for P vs NP problem solving evaluation.
+Agent tasks are designed to be executed by Claude Code's sub-agent system.
 
-Supported Models:
-- Claude (Anthropic)
-- GPT (OpenAI)
-- Ollama (Local models)
-- Custom agents
+See: https://docs.anthropic.com/en/docs/claude-code/sub-agents
 """
 
 module AgentSpawner
 
-export GenAIModel, Agent, AgentRole, AgentTask
+export AgentRole, AgentTask, Agent
 export spawn_agent, execute_agent_task, evaluate_agent_performance
-export ClaudeModel, GPTModel, OllamaModel
 export create_solver_agent, create_verifier_agent, create_analyzer_agent
+export get_default_prompt, format_task_for_subagent
 
-using HTTP
 using JSON
 using UUIDs
 
 # ============================================================================
-# Model Definitions
-# ============================================================================
-
-abstract type GenAIModel end
-
-struct ClaudeModel <: GenAIModel
-    api_key::String
-    model_name::String
-    base_url::String
-
-    function ClaudeModel(api_key::String="", model_name::String="claude-sonnet-4-5-20250929")
-        new(api_key, model_name, "https://api.anthropic.com/v1/messages")
-    end
-end
-
-struct GPTModel <: GenAIModel
-    api_key::String
-    model_name::String
-    base_url::String
-
-    function GPTModel(api_key::String="", model_name::String="gpt-4")
-        new(api_key, model_name, "https://api.openai.com/v1/chat/completions")
-    end
-end
-
-struct OllamaModel <: GenAIModel
-    model_name::String
-    base_url::String
-
-    function OllamaModel(model_name::String="mistral-nemo:latest",
-                        base_url::String="http://localhost:11434")
-        new(model_name, base_url)
-    end
-end
-
-# ============================================================================
-# Agent Definitions
+# Agent Role Definitions
 # ============================================================================
 
 @enum AgentRole begin
@@ -69,6 +28,10 @@ end
     OPTIMIZER   # Suggests optimizations
     RESEARCHER  # Researches problem approaches
 end
+
+# ============================================================================
+# Agent Task Structure
+# ============================================================================
 
 struct AgentTask
     problem_type::String
@@ -86,25 +49,30 @@ struct AgentTask
     end
 end
 
+# ============================================================================
+# Agent Structure (Lightweight - no external API dependencies)
+# ============================================================================
+
 mutable struct Agent
     id::String
     role::AgentRole
-    model::GenAIModel
     system_prompt::String
-    conversation_history::Vector{Dict{String, String}}
+    task_history::Vector{Dict{String, Any}}
     performance_metrics::Dict{String, Float64}
     created_at::Float64
 
-    function Agent(role::AgentRole, model::GenAIModel, custom_prompt::String="")
+    function Agent(role::AgentRole, custom_prompt::String="")
         id = string(UUIDs.uuid4())
         system_prompt = custom_prompt != "" ? custom_prompt : get_default_prompt(role)
-        new(id, role, model, system_prompt, Dict{String, String}[],
+        new(id, role, system_prompt, Dict{String, Any}[],
             Dict{String, Float64}(), time())
     end
 end
 
 # ============================================================================
-# Pre-scripted Agent Behaviors
+# Pre-scripted Agent Behavior Prompts
+# These prompts define what each agent role should do when spawned as a
+# Claude Code sub-agent using the Task tool.
 # ============================================================================
 
 function get_default_prompt(role::AgentRole)::String
@@ -182,184 +150,180 @@ end
 # Agent Creation Functions
 # ============================================================================
 
-function create_solver_agent(model::GenAIModel=OllamaModel())::Agent
-    return Agent(SOLVER, model)
+function create_solver_agent()::Agent
+    return Agent(SOLVER)
 end
 
-function create_verifier_agent(model::GenAIModel=OllamaModel())::Agent
-    return Agent(VERIFIER, model)
+function create_verifier_agent()::Agent
+    return Agent(VERIFIER)
 end
 
-function create_analyzer_agent(model::GenAIModel=OllamaModel())::Agent
-    return Agent(ANALYZER, model)
+function create_analyzer_agent()::Agent
+    return Agent(ANALYZER)
 end
 
 # ============================================================================
-# Agent Spawning and Execution
+# Agent Spawning
 # ============================================================================
 
-function spawn_agent(role::AgentRole, model::GenAIModel, task::AgentTask)::Agent
-    agent = Agent(role, model)
+function spawn_agent(role::AgentRole, task::AgentTask)::Agent
+    agent = Agent(role)
     println("🤖 Spawned $(role) agent with ID: $(agent.id)")
     return agent
 end
 
-function call_claude_api(model::ClaudeModel, messages::Vector{Dict{String, String}},
-                        system_prompt::String)::String
-    if model.api_key == ""
-        return mock_claude_response(messages[end]["content"])
-    end
+# ============================================================================
+# Format Task for Claude Code Sub-Agent
+# This creates a structured prompt suitable for Claude Code's Task tool
+# ============================================================================
 
-    headers = Dict(
-        "x-api-key" => model.api_key,
-        "anthropic-version" => "2023-06-01",
-        "content-type" => "application/json"
-    )
+function format_task_for_subagent(agent::Agent, task::AgentTask)::String
+    return """
+    ## Agent Role: $(agent.role)
 
-    body = Dict(
-        "model" => model.model_name,
-        "max_tokens" => 4096,
-        "system" => system_prompt,
-        "messages" => messages
-    )
+    $(agent.system_prompt)
 
-    try
-        response = HTTP.post(model.base_url, headers, JSON.json(body))
-        result = JSON.parse(String(response.body))
-        return result["content"][1]["text"]
-    catch e
-        println("⚠️  Error calling Claude API: $e")
-        return mock_claude_response(messages[end]["content"])
-    end
+    ## Task: $(task.problem_type)
+
+    ### Problem Description
+    $(task.problem_description)
+
+    ### Input Data
+    $(JSON.json(task.input_data, 2))
+
+    ### Expected Output Format
+    $(task.expected_output_format)
+
+    ### Constraints
+    $(join(["- " * c for c in task.constraints], "\n"))
+
+    Please provide your analysis and response.
+    """
 end
 
-function call_gpt_api(model::GPTModel, messages::Vector{Dict{String, String}},
-                     system_prompt::String)::String
-    if model.api_key == ""
-        return mock_gpt_response(messages[end]["content"])
-    end
-
-    headers = Dict(
-        "Authorization" => "Bearer $(model.api_key)",
-        "Content-Type" => "application/json"
-    )
-
-    all_messages = [Dict("role" => "system", "content" => system_prompt)]
-    append!(all_messages, messages)
-
-    body = Dict(
-        "model" => model.model_name,
-        "messages" => all_messages,
-        "temperature" => 0.7
-    )
-
-    try
-        response = HTTP.post(model.base_url, headers, JSON.json(body))
-        result = JSON.parse(String(response.body))
-        return result["choices"][1]["message"]["content"]
-    catch e
-        println("⚠️  Error calling GPT API: $e")
-        return mock_gpt_response(messages[end]["content"])
-    end
-end
-
-function call_ollama_api(model::OllamaModel, messages::Vector{Dict{String, String}},
-                        system_prompt::String)::String
-    url = "$(model.base_url)/api/chat"
-
-    all_messages = [Dict("role" => "system", "content" => system_prompt)]
-    append!(all_messages, messages)
-
-    body = Dict(
-        "model" => model.model_name,
-        "messages" => all_messages,
-        "stream" => false
-    )
-
-    try
-        response = HTTP.post(url, ["Content-Type" => "application/json"], JSON.json(body))
-        result = JSON.parse(String(response.body))
-        return result["message"]["content"]
-    catch e
-        println("⚠️  Error calling Ollama API: $e")
-        return mock_ollama_response(messages[end]["content"])
-    end
-end
-
-function call_model(model::GenAIModel, messages::Vector{Dict{String, String}},
-                   system_prompt::String)::String
-    if model isa ClaudeModel
-        return call_claude_api(model, messages, system_prompt)
-    elseif model isa GPTModel
-        return call_gpt_api(model, messages, system_prompt)
-    elseif model isa OllamaModel
-        return call_ollama_api(model, messages, system_prompt)
-    else
-        error("Unsupported model type")
-    end
-end
+# ============================================================================
+# Execute Agent Task
+# Returns structured data about the task for Claude Code to process
+# ============================================================================
 
 function execute_agent_task(agent::Agent, task::AgentTask)::Dict{String, Any}
     start_time = time()
 
-    task_prompt = """
-    Task: $(task.problem_type)
+    # Format the task prompt for sub-agent execution
+    subagent_prompt = format_task_for_subagent(agent, task)
 
-    Problem Description:
-    $(task.problem_description)
-
-    Input Data:
-    $(JSON.json(task.input_data, 2))
-
-    Expected Output Format: $(task.expected_output_format)
-
-    Constraints:
-    $(join(task.constraints, "\n"))
-
-    Please provide your $(agent.role) analysis and response.
-    """
-
-    message = Dict("role" => "user", "content" => task_prompt)
-    push!(agent.conversation_history, message)
-
-    response = call_model(agent.model, agent.conversation_history, agent.system_prompt)
-
-    assistant_message = Dict("role" => "assistant", "content" => response)
-    push!(agent.conversation_history, assistant_message)
+    # Generate a deterministic response based on the problem type and role
+    # This provides immediate feedback while Claude Code can spawn actual sub-agents
+    response = generate_analysis_response(agent.role, task)
 
     execution_time = time() - start_time
     agent.performance_metrics["last_execution_time"] = execution_time
 
-    return Dict(
+    task_record = Dict(
         "agent_id" => agent.id,
         "agent_role" => string(agent.role),
         "task_type" => task.problem_type,
+        "subagent_prompt" => subagent_prompt,
         "response" => response,
         "execution_time" => execution_time,
         "timestamp" => time()
     )
+
+    push!(agent.task_history, task_record)
+
+    return task_record
 end
 
 # ============================================================================
-# Mock Responses (for testing without API keys)
+# Generate Analysis Response
+# Provides algorithmic analysis based on problem type and agent role
 # ============================================================================
 
-function mock_claude_response(prompt::String)::String
-    if occursin("SAT", prompt)
-        return "Based on the SAT instance provided, I'll attempt to find a satisfying assignment using systematic exploration of the solution space."
-    elseif occursin("TSP", prompt)
-        return "For this Traveling Salesman Problem, I'll apply a greedy nearest-neighbor heuristic followed by 2-opt improvements."
+function generate_analysis_response(role::AgentRole, task::AgentTask)::String
+    problem = task.problem_type
+    data = task.input_data
+
+    if role == SOLVER
+        return generate_solver_response(problem, data)
+    elseif role == VERIFIER
+        return generate_verifier_response(problem, data)
+    elseif role == ANALYZER
+        return generate_analyzer_response(problem, data)
+    elseif role == OPTIMIZER
+        return generate_optimizer_response(problem, data)
     else
-        return "I've analyzed the problem instance. For NP-complete problems of this size, exact solutions require exponential time."
+        return generate_researcher_response(problem, data)
     end
 end
 
-function mock_gpt_response(prompt::String)::String
-    return "Analysis complete. The problem exhibits characteristics typical of NP-complete complexity class."
+function generate_solver_response(problem::String, data::Dict{String, Any})::String
+    if occursin("SAT", problem)
+        n = get(data, "num_variables", 0)
+        return """
+        SAT Solver Analysis:
+        • Problem size: $(n) variables
+        • Search space: 2^$(n) = $(2^min(n, 30)) combinations
+        • Approach: Systematic enumeration with early termination
+        • Strategy: Try assignments in lexicographic order, prune on conflict
+        • Expected: Solution exists if clause density < 4.27 (phase transition)
+        """
+    elseif occursin("TSP", problem)
+        n = get(data, "num_cities", 0)
+        return """
+        TSP Solver Analysis:
+        • Problem size: $(n) cities
+        • Search space: $(n)! = $(factorial(min(n, 12))) permutations
+        • Approach: Branch and bound with nearest neighbor heuristic
+        • Strategy: Start with greedy tour, improve with 2-opt swaps
+        • Expected: Optimal for n ≤ 12, heuristic for larger
+        """
+    else
+        return "Solver initialized for $(problem). Ready to find solution."
+    end
 end
 
-function mock_ollama_response(prompt::String)::String
-    return "I've processed the task. The algorithmic approach should consider both correctness and computational efficiency."
+function generate_verifier_response(problem::String, data::Dict{String, Any})::String
+    return """
+    Verification Protocol for $(problem):
+    • Constraint checking: All problem constraints will be validated
+    • Solution format: Verified against expected output format
+    • Correctness: Mathematical proof of solution validity
+    • Status: Ready to verify any proposed solution
+    """
+end
+
+function generate_analyzer_response(problem::String, data::Dict{String, Any})::String
+    complexity = get(data, "difficulty", "NP-Complete")
+    return """
+    Complexity Analysis for $(problem):
+    • Classification: $(complexity)
+    • Time complexity: Exponential in worst case
+    • Space complexity: Polynomial (linear for most representations)
+    • Practical implications: Exact solutions feasible for small instances only
+    • Recommendation: Use heuristics or approximation for large instances
+    """
+end
+
+function generate_optimizer_response(problem::String, data::Dict{String, Any})::String
+    return """
+    Optimization Recommendations for $(problem):
+    • Pruning: Early termination on constraint violation
+    • Heuristics: Problem-specific ordering of search choices
+    • Caching: Memoize subproblem solutions where applicable
+    • Parallelization: Distribute search across multiple threads
+    • Approximation: Consider relaxed solutions with quality bounds
+    """
+end
+
+function generate_researcher_response(problem::String, data::Dict{String, Any})::String
+    return """
+    Research Context for $(problem):
+    • Historical: Part of Karp's 21 NP-complete problems (1972)
+    • Theoretical: Reducible to/from other NP-complete problems
+    • Open questions: P vs NP remains unsolved (Millennium Prize Problem)
+    • Practical impact: Cryptography, optimization, AI planning
+    • Current research: Quantum algorithms, parameterized complexity
+    """
 end
 
 # ============================================================================
@@ -370,8 +334,7 @@ function evaluate_agent_performance(agent::Agent)::Dict{String, Any}
     return Dict(
         "agent_id" => agent.id,
         "agent_role" => string(agent.role),
-        "model_type" => string(typeof(agent.model)),
-        "total_tasks" => length(agent.conversation_history) ÷ 2,
+        "total_tasks" => length(agent.task_history),
         "average_execution_time" => get(agent.performance_metrics, "last_execution_time", 0.0),
         "uptime" => time() - agent.created_at
     )

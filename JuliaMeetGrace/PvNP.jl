@@ -1,10 +1,13 @@
 #!/usr/bin/env julia
 """
-PvNP.jl - Main Program for P vs NP Evaluation using GenAI Agents
+PvNP.jl - Main Program for P vs NP Evaluation using Claude Code Sub-Agents
 
-This program evaluates NP-complete problems using multiple GenAI models
-to spawn pre-scripted agents. It focuses on finding and analyzing
+This program evaluates NP-complete problems using Claude Code's sub-agent
+system to spawn pre-scripted agents. It focuses on finding and analyzing
 NP-complete algorithms through automated agent-based evaluation.
+
+Agent tasks are designed to be executed by Claude Code's Task tool.
+See: https://docs.anthropic.com/en/docs/claude-code/sub-agents
 
 Usage:
     julia PvNP.jl [options]
@@ -12,14 +15,14 @@ Usage:
 Options:
     --problem <type>     Problem type: SAT, TSP, GraphColoring, Knapsack (default: SAT)
     --size <n>          Problem size (default: 10)
-    --models <models>   Comma-separated list of models: ollama,claude,gpt (default: ollama)
+    --agents <n>        Number of agent teams to spawn (default: 1)
     --benchmark         Run benchmark mode
     --interactive       Run interactive mode
     --help             Show this help message
 
 Examples:
     julia PvNP.jl --problem SAT --size 8
-    julia PvNP.jl --problem TSP --size 6 --models ollama,claude
+    julia PvNP.jl --problem TSP --size 6 --agents 2
     julia PvNP.jl --benchmark
     julia PvNP.jl --interactive
 """
@@ -38,7 +41,7 @@ function parse_arguments(args::Vector{String})::Dict{String, Any}
     options = Dict{String, Any}(
         "problem" => "SAT",
         "size" => 10,
-        "models" => ["ollama"],
+        "agents" => 1,
         "benchmark" => false,
         "interactive" => false,
         "help" => false
@@ -56,8 +59,8 @@ function parse_arguments(args::Vector{String})::Dict{String, Any}
         elseif arg == "--size" && i < length(args)
             options["size"] = parse(Int, args[i + 1])
             i += 1
-        elseif arg == "--models" && i < length(args)
-            options["models"] = split(args[i + 1], ',')
+        elseif arg == "--agents" && i < length(args)
+            options["agents"] = parse(Int, args[i + 1])
             i += 1
         elseif arg == "--benchmark"
             options["benchmark"] = true
@@ -126,12 +129,12 @@ function run_interactive_evaluation(problem_type::String)
     size_input = readline()
     size = isempty(size_input) ? 10 : parse(Int, size_input)
 
-    print("Enter models (ollama/claude/gpt, comma-separated, default ollama): ")
-    models_input = readline()
-    models = isempty(models_input) ? ["ollama"] : split(models_input, ',')
+    print("Enter number of agent teams (default 1): ")
+    agents_input = readline()
+    num_agents = isempty(agents_input) ? 1 : parse(Int, agents_input)
 
     println("\n🔬 Creating evaluation session...")
-    session = create_evaluation_session(problem_type, size, models)
+    session = create_evaluation_session(problem_type, size, num_agents)
 
     println("\n⚙️  Running evaluation...")
     result = run_evaluation(session)
@@ -227,20 +230,20 @@ end
 function standard_evaluation(options::Dict{String, Any})
     problem_type = options["problem"]
     size = options["size"]
-    models = options["models"]
+    num_agents = options["agents"]
 
     println("╔════════════════════════════════════════════════════════════════════════╗")
-    println("║            P vs NP Evaluation using GenAI Agents                       ║")
+    println("║         P vs NP Evaluation using Claude Code Sub-Agents               ║")
     println("╚════════════════════════════════════════════════════════════════════════╝")
     println()
     println("Configuration:")
     println("  ├─ Problem Type: $problem_type")
     println("  ├─ Problem Size: $size")
-    println("  └─ Models: $(join(models, ", "))")
+    println("  └─ Agent Teams: $num_agents")
     println()
 
     # Create and run evaluation session
-    session = create_evaluation_session(problem_type, size, models)
+    session = create_evaluation_session(problem_type, size, num_agents)
     result = run_evaluation(session)
 
     # Generate and display report
@@ -288,7 +291,7 @@ function run_demonstration()
         println("  └─ Estimated Runtime: $(analysis["estimated_runtime"])")
 
         println("\n🔬 Running mini evaluation...")
-        session = create_evaluation_session(problem_type, size, ["ollama"])
+        session = create_evaluation_session(problem_type, size, 1)
         result = run_evaluation(session, timeout=30.0)
 
         println("✅ Completed in $(round(result.total_time, digits=2))s")
